@@ -1,0 +1,473 @@
+# ============================================================
+# DESHUMIDIFICATEUR ESPHOME + TUYA MCU
+# ============================================================
+#
+# Fonctionnement :
+#
+# Auto :
+# - journée : 8h -> 20h
+# - période silencieuse : 20h -> 8h
+#
+# Après coupure :
+# - retour en Auto
+# - réglages mémorisés
+#
+# Marche forcée :
+# - ON permanent
+#
+# Arrêt forcé :
+# - OFF permanent
+#
+# Boost 1h :
+# - ON pendant 1h
+#
+# Réglages modifiés directement sur l'appareil :
+# - détectés par ESPHome
+# - tolérés 1 minute
+# - puis ESPHome reprend la main
+#
+# MQTT supprimé :
+# - tout passe par API ESPHome
+# ============================================================
+
+esphome:
+  name: deshumidificateur
+  friendly_name: Deshumidificateur
+
+  on_boot:
+    priority: -100
+    then:
+      - delay: 20s
+      - script.execute: verif_auto
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: arduino
+
+wifi:
+  ssid: "REMPLACE_MOI_WIFI"
+  password: "REMPLACE_MOI_MDP"
+
+  ap:
+    ssid: "Deshumidificateur_Secours"
+    password: "CHANGE_ME_123"
+
+captive_portal:
+
+logger:
+  baud_rate: 0
+
+api:
+  reboot_timeout: 0s
+
+ota:
+  platform: esphome
+
+time:
+  - platform: sntp
+    id: heure
+    timezone: Europe/Paris
+    servers:
+      - 0.fr.pool.ntp.org
+      - 1.fr.pool.ntp.org
+      - 2.fr.pool.ntp.org
+
+uart:
+  rx_pin: GPIO20
+  tx_pin: GPIO21
+  baud_rate: 9600
+
+tuya:
+
+globals:
+  - id: mode_pilotage
+    type: int
+    restore_value: false
+    initial_value: "0"
+
+  - id: boost_end
+    type: int
+    restore_value: false
+    initial_value: "0"
+
+  - id: retour_reglages_ts
+    type: int
+    restore_value: false
+    initial_value: "0"
+
+  - id: commande_interne
+    type: bool
+    restore_value: false
+    initial_value: "false"
+
+script:
+  - id: verif_auto
+    mode: restart
+    then:
+      - lambda: |-
+          auto now = id(heure).now();
+          if (!now.is_valid()) return;
+
+          int now_ts = now.timestamp;
+          int h = now.hour;
+
+          int debut = (int) id(heure_debut_silence).state;
+          int fin = (int) id(heure_fin_silence).state;
+
+          bool silence;
+
+          if (debut < fin) {
+            silence = h >= debut && h < fin;
+          } else {
+            silence = h >= debut || h < fin;
+          }
+
+          float cible = silence
+            ? id(consigne_silence).state
+            : id(consigne_jour).state;
+
+          float hum = id(humidite_actuelle).state;
+          float hyst = id(hysteresis_auto).state;
+
+          if (isnan(cible) || isnan(hum) || isnan(hyst)) return;
+
+          bool doit_marcher = false;
+          bool boost_actif = id(boost_end) > now_ts;
+
+          if (id(mode_pilotage) == 1) {
+            doit_marcher = true;
+          }
+          else if (id(mode_pilotage) == 2) {
+            doit_marcher = false;
+          }
+          else if (boost_actif) {
+            doit_marcher = true;
+          }
+          else {
+            if (hum >= cible + hyst) {
+              doit_marcher = true;
+            }
+            else if (hum <= cible - hyst) {
+              doit_marcher = false;
+            }
+            else {
+              doit_marcher = id(marche).state;
+            }
+          }
+
+          bool reprise_autorisee =
+            (id(retour_reglages_ts) == 0 ||
+             now_ts >= id(retour_reglages_ts));
+
+          if (!reprise_autorisee) return;
+
+          id(commande_interne) = true;
+
+          auto mode_call = id(mode_appareil).make_call();
+          mode_call.set_option("Réglage taux");
+          mode_call.perform();
+
+          auto vent_call = id(ventilateur).make_call();
+          vent_call.set_option(id(vitesse_ventilo).state);
+          vent_call.perform();
+
+          delay(300);
+
+          if (doit_marcher) {
+            id(marche).turn_on();
+          } else {
+            id(marche).turn_off();
+          }
+
+          id(commande_interne) = false;
+
+switch:
+  - platform: tuya
+    name: "Marche appareil"
+    id: marche
+    switch_datapoint: 1
+
+select:
+  - platform: template
+    name: "Mode fonctionnement"
+    id: mode_fonctionnement
+
+    optimistic: true
+    restore_value: false
+    initial_option: "Auto"
+
+    options:
+      - "Auto"
+      - "Marche forcée"
+      - "Arrêt forcé"
+
+    set_action:
+      - lambda: |-
+          if (x == "Auto")
+            id(mode_pilotage) = 0;
+          else if (x == "Marche forcée")
+            id(mode_pilotage) = 1;
+          else if (x == "Arrêt forcé")
+            id(mode_pilotage) = 2;
+
+      - script.execute: verif_auto
+
+  - platform: template
+    name: "Vitesse ventilateur voulue"
+    id: vitesse_ventilo
+
+    optimistic: true
+    restore_value: true
+    initial_option: "Faible"
+
+    options:
+      - "Faible"
+      - "Fort"
+
+    set_action:
+      - script.execute: verif_auto
+
+  - platform: tuya
+    name: "Mode appareil"
+    id: mode_appareil
+
+    enum_datapoint: 5
+
+    options:
+      0: "CO"
+      1: "AU"
+      2: "Réglage taux"
+
+    on_value:
+      then:
+        - lambda: |-
+            if (!id(commande_interne)) {
+              auto now = id(heure).now();
+
+              if (now.is_valid()) {
+                id(retour_reglages_ts) = now.timestamp + 60;
+              }
+            }
+
+  - platform: tuya
+    name: "Ventilateur appareil"
+    id: ventilateur
+
+    enum_datapoint: 4
+
+    options:
+      0: "Fort"
+      1: "Faible"
+
+    on_value:
+      then:
+        - lambda: |-
+            if (!id(commande_interne)) {
+              auto now = id(heure).now();
+
+              if (now.is_valid()) {
+                id(retour_reglages_ts) = now.timestamp + 60;
+              }
+            }
+
+number:
+  - platform: tuya
+    name: "Consigne appareil"
+    id: consigne_appareil
+
+    number_datapoint: 2
+
+    min_value: 30
+    max_value: 90
+    step: 5
+
+    unit_of_measurement: "%"
+
+    on_value:
+      then:
+        - lambda: |-
+            if (!id(commande_interne)) {
+              auto now = id(heure).now();
+
+              if (now.is_valid()) {
+                id(retour_reglages_ts) = now.timestamp + 60;
+              }
+            }
+
+  - platform: template
+    name: "Humidité cible jour"
+    id: consigne_jour
+
+    min_value: 30
+    max_value: 90
+    step: 1
+
+    restore_value: true
+    optimistic: true
+    initial_value: 30
+
+    unit_of_measurement: "%"
+
+    on_value:
+      then:
+        - script.execute: verif_auto
+
+  - platform: template
+    name: "Humidité cible période silencieuse"
+    id: consigne_silence
+
+    min_value: 30
+    max_value: 90
+    step: 1
+
+    restore_value: true
+    optimistic: true
+    initial_value: 70
+
+    unit_of_measurement: "%"
+
+    on_value:
+      then:
+        - script.execute: verif_auto
+
+  - platform: template
+    name: "Heure début période silencieuse"
+    id: heure_debut_silence
+
+    min_value: 0
+    max_value: 23
+    step: 1
+
+    restore_value: true
+    optimistic: true
+    initial_value: 20
+
+    on_value:
+      then:
+        - script.execute: verif_auto
+
+  - platform: template
+    name: "Heure fin période silencieuse"
+    id: heure_fin_silence
+
+    min_value: 0
+    max_value: 23
+    step: 1
+
+    restore_value: true
+    optimistic: true
+    initial_value: 8
+
+    on_value:
+      then:
+        - script.execute: verif_auto
+
+  - platform: template
+    name: "Marge auto"
+    id: hysteresis_auto
+
+    min_value: 1
+    max_value: 10
+    step: 1
+
+    restore_value: true
+    optimistic: true
+    initial_value: 2
+
+    unit_of_measurement: "%"
+
+    on_value:
+      then:
+        - script.execute: verif_auto
+
+sensor:
+  - platform: tuya
+    name: "Humidité actuelle"
+    id: humidite_actuelle
+
+    sensor_datapoint: 6
+
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+
+    on_value:
+      then:
+        - script.execute: verif_auto
+
+binary_sensor:
+  - platform: tuya
+    name: "Bac OK"
+    id: bac_ok
+    sensor_datapoint: 25
+
+  - platform: template
+    name: "Bac plein"
+    id: bac_plein
+    device_class: problem
+
+    lambda: |-
+      return !id(bac_ok).state;
+
+button:
+  - platform: template
+    name: "Boost 1h"
+    id: boost_1h
+
+    on_press:
+      then:
+        - lambda: |-
+            auto now = id(heure).now();
+
+            if (now.is_valid()) {
+              id(boost_end) = now.timestamp + 3600;
+              id(retour_reglages_ts) = 0;
+            }
+
+        - script.execute: verif_auto
+
+  - platform: template
+    name: "Stop boost"
+    id: stop_boost
+
+    on_press:
+      then:
+        - lambda: |-
+            id(boost_end) = 0;
+            id(retour_reglages_ts) = 0;
+
+        - script.execute: verif_auto
+
+text_sensor:
+  - platform: template
+    name: "Boost état"
+    id: boost_etat
+
+    lambda: |-
+      auto now = id(heure).now();
+
+      if (!now.is_valid()) {
+        return std::string("Heure inconnue");
+      }
+
+      if (id(boost_end) > now.timestamp) {
+        int reste = id(boost_end) - now.timestamp;
+
+        char buffer[40];
+        sprintf(buffer, "Actif encore %d min", reste / 60);
+
+        return std::string(buffer);
+      }
+
+      return std::string("Inactif");
+
+    update_interval: 10s
+
+interval:
+  - interval: 10s
+    then:
+      - script.execute: verif_auto
+
+  - interval: 1min
+    then:
+      - script.execute: verif_auto

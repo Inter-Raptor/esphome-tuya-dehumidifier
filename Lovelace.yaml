@@ -1,0 +1,43 @@
+type: grid
+cards:
+  - type: heading
+    heading: Déshumidificateur
+  - type: custom:raptor-dehumidifier-card
+    size: small
+    background: light
+    title: Déshumidificateur
+    entity_power: switch.deshumidificateur_marche_appareil
+    entity_humidity: sensor.deshumidificateur_humidite_actuelle
+    entity_target: text_sensor.deshumidificateur_cible_active
+    entity_boost: button.deshumidificateur_boost_1h
+    entity_stop_boost: button.deshumidificateur_stop_boost
+    entity_boost_state: text_sensor.deshumidificateur_boost_etat
+    entity_mode: select.deshumidificateur_mode_fonctionnement
+    entity_tank_full: binary_sensor.deshumidificateur_bac_plein
+    long_press_path: /config/devices/device/fbe915cd377cd1abeb3b141b84048a36c
+  - type: custom:raptor-dehumidifier-card
+    size: medium
+    background: dark
+    title: Déshumidificateur
+    entity_power: switch.deshumidificateur_marche_appareil
+    entity_humidity: sensor.deshumidificateur_humidite_actuelle
+    entity_target: text_sensor.deshumidificateur_cible_active
+    entity_boost: button.deshumidificateur_boost_1h
+    entity_stop_boost: button.deshumidificateur_stop_boost
+    entity_boost_state: text_sensor.deshumidificateur_boost_etat
+    entity_mode: select.deshumidificateur_mode_fonctionnement
+    entity_tank_full: binary_sensor.deshumidificateur_bac_plein
+    long_press_path: /config/devices/device/fbe915cd377cd1abeb3b141b84048a36c
+  - type: custom:raptor-dehumidifier-card
+    size: large
+    background: glass
+    title: Déshumidificateur
+    entity_power: switch.deshumidificateur_marche_appareil
+    entity_humidity: sensor.deshumidificateur_humidite_actuelle
+    entity_target: text_sensor.deshumidificateur_cible_active
+    entity_boost: button.deshumidificateur_boost_1h
+    entity_stop_boost: button.deshumidificateur_stop_boost
+    entity_boost_state: text_sensor.deshumidificateur_boost_etat
+    entity_mode: select.deshumidificateur_mode_fonctionnement
+    entity_tank_full: binary_sensor.deshumidificateur_bac_plein
+    long_press_path: /config/devices/device/fbe915cd377cd1abeb3b141b84048a36c
