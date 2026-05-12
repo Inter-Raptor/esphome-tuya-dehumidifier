@@ -15,7 +15,6 @@ class RaptorDehumidifierCard extends HTMLElement {
       entity_stop_boost: null,
       entity_boost_state: null,
       entity_mode: null,
-      long_press_path: null,
       ...config,
     };
   }
@@ -101,6 +100,22 @@ class RaptorDehumidifierCard extends HTMLElement {
     return "";
   }
 
+  openMoreInfo() {
+    const entity = this.config.entity_mode;
+
+    if (!entity) return;
+
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        bubbles: true,
+        composed: true,
+        detail: {
+          entityId: entity,
+        },
+      })
+    );
+  }
+
   async toggleBoost() {
     if (this.isBoostActive()) {
       this.setStoredBoostOff();
@@ -126,12 +141,6 @@ class RaptorDehumidifierCard extends HTMLElement {
     });
   }
 
-  openMoreInfo() {
-    if (!this.config.long_press_path) return;
-    window.history.pushState(null, "", this.config.long_press_path);
-    window.dispatchEvent(new Event("location-changed"));
-  }
-
   attachPress(target) {
     if (!target) return;
 
@@ -142,6 +151,7 @@ class RaptorDehumidifierCard extends HTMLElement {
       if (e.target.closest("button")) return;
 
       longPress = false;
+
       timer = setTimeout(() => {
         longPress = true;
         this.openMoreInfo();
@@ -506,6 +516,7 @@ class RaptorDehumidifierCard extends HTMLElement {
     });
 
     this.attachPress(this.querySelector(".mini-card"));
+    this.attachPress(this.querySelector(".large"));
   }
 }
 
